@@ -31,9 +31,10 @@ from batchgeneratorsv2.transforms.spatial.mirroring import MirrorTransform
 from batchgeneratorsv2.transforms.spatial.spatial import SpatialTransform
 from batchgeneratorsv2.transforms.utils.compose import ComposeTransforms
 from batchgeneratorsv2.transforms.utils.deep_supervision_downsampling import DownsampleSegForDSTransform
+from batchgeneratorsv2.transforms.utils.doNothing import TransformNothing
 from batchgeneratorsv2.transforms.utils.nnunet_masking import MaskImageTransform
 from batchgeneratorsv2.transforms.utils.pseudo2d import Convert3DTo2DTransform, Convert2DTo3DTransform
-from batchgeneratorsv2.transforms.utils.random import RandomTransform
+from batchgeneratorsv2.transforms.utils.random import RandomTransform, TransformEachTimestep
 from batchgeneratorsv2.transforms.utils.remove_label import RemoveLabelTansform
 from batchgeneratorsv2.transforms.utils.seg_to_regions import ConvertSegmentationToRegionsTransform
 from torch import autocast, nn
@@ -53,7 +54,7 @@ from nnunetv2.training.data_augmentation.compute_initial_patch_size import get_p
 from nnunetv2.training.dataloading.nnunet_dataset import infer_dataset_class
 from nnunetv2.training.dataloading.data_loader import nnUNetDataLoader
 from nnunetv2.training.logging.nnunet_logger import nnUNetLogger
-from nnunetv2.training.loss.compound_losses import DC_and_CE_loss, DC_and_BCE_loss
+from nnunetv2.training.loss.compound_losses import DC_and_CE_loss, DC_and_BCE_loss, Time_DC_and_CE_loss
 from nnunetv2.training.loss.deep_supervision import DeepSupervisionWrapper
 from nnunetv2.training.loss.dice import get_tp_fp_fn_tn, MemoryEfficientSoftDiceLoss
 from nnunetv2.training.lr_scheduler.polylr import PolyLRScheduler
@@ -150,7 +151,7 @@ class nnUNetTrainer(object):
         self.num_val_iterations_per_epoch = 50
         self.num_epochs = 1000
         self.current_epoch = 0
-        self.enable_deep_supervision = True
+        self.enable_deep_supervision = False
 
         ### Dealing with labels/regions
         self.label_manager = self.plans_manager.get_label_manager(dataset_json)
@@ -449,6 +450,14 @@ class nnUNetTrainer(object):
             else:
                 rotation_for_DA = (-30. / 360 * 2. * np.pi, 30. / 360 * 2. * np.pi)
             mirror_axes = (0, 1, 2)
+        elif dim == 4:
+            do_dummy_2d_data_aug = (max(patch_size) / patch_size[1]) > ANISO_THRESHOLD
+            if do_dummy_2d_data_aug:
+                # why do we rotate 180 deg here all the time? We should also restrict it
+                rotation_for_DA = (-180. / 360 * 2. * np.pi, 180. / 360 * 2. * np.pi)
+            else:
+                rotation_for_DA = (-30. / 360 * 2. * np.pi, 30. / 360 * 2. * np.pi)
+            mirror_axes = (1, 2, 3)
         else:
             raise RuntimeError()
 
@@ -705,6 +714,12 @@ class nnUNetTrainer(object):
             ignore_label: int = None,
     ) -> BasicTransform:
         transforms = []
+        ndim = len(patch_size)
+        if ndim <= 3:
+            time_handling_transform_class = TransformNothing
+        if ndim == 4:
+            time_handling_transform_class = TransformEachTimestep
+
         if do_dummy_2d_data_aug:
             ignore_axes = (0,)
             transforms.append(Convert3DTo2DTransform())
@@ -724,37 +739,37 @@ class nnUNetTrainer(object):
         if do_dummy_2d_data_aug:
             transforms.append(Convert2DTo3DTransform())
 
-        transforms.append(RandomTransform(
+        transforms.append(RandomTransform(time_handling_transform_class(
             GaussianNoiseTransform(
                 noise_variance=(0, 0.1),
                 p_per_channel=1,
                 synchronize_channels=True
-            ), apply_probability=0.1
+            )), apply_probability=0.1
         ))
-        transforms.append(RandomTransform(
+        transforms.append(RandomTransform(time_handling_transform_class(
             GaussianBlurTransform(
                 blur_sigma=(0.5, 1.),
                 synchronize_channels=False,
                 synchronize_axes=False,
                 p_per_channel=0.5, benchmark=True
-            ), apply_probability=0.2
+            )), apply_probability=0.2
         ))
-        transforms.append(RandomTransform(
+        transforms.append(RandomTransform(time_handling_transform_class(
             MultiplicativeBrightnessTransform(
                 multiplier_range=BGContrast((0.75, 1.25)),
                 synchronize_channels=False,
                 p_per_channel=1
-            ), apply_probability=0.15
+            )), apply_probability=0.15
         ))
-        transforms.append(RandomTransform(
+        transforms.append(RandomTransform(time_handling_transform_class(
             ContrastTransform(
                 contrast_range=BGContrast((0.75, 1.25)),
                 preserve_range=True,
                 synchronize_channels=False,
                 p_per_channel=1
-            ), apply_probability=0.15
+            )), apply_probability=0.15
         ))
-        transforms.append(RandomTransform(
+        transforms.append(RandomTransform(time_handling_transform_class(
             SimulateLowResolutionTransform(
                 scale=(0.5, 1),
                 synchronize_channels=False,
@@ -762,25 +777,25 @@ class nnUNetTrainer(object):
                 ignore_axes=ignore_axes,
                 allowed_channels=None,
                 p_per_channel=0.5
-            ), apply_probability=0.25
+            )), apply_probability=0.25
         ))
-        transforms.append(RandomTransform(
+        transforms.append(RandomTransform(time_handling_transform_class(
             GammaTransform(
                 gamma=BGContrast((0.7, 1.5)),
                 p_invert_image=1,
                 synchronize_channels=False,
                 p_per_channel=1,
                 p_retain_stats=1
-            ), apply_probability=0.1
+            )), apply_probability=0.1
         ))
-        transforms.append(RandomTransform(
+        transforms.append(RandomTransform(time_handling_transform_class(
             GammaTransform(
                 gamma=BGContrast((0.7, 1.5)),
                 p_invert_image=0,
                 synchronize_channels=False,
                 p_per_channel=1,
                 p_retain_stats=1
-            ), apply_probability=0.3
+            )), apply_probability=0.3
         ))
         if mirror_axes is not None and len(mirror_axes) > 0:
             transforms.append(
@@ -809,22 +824,22 @@ class nnUNetTrainer(object):
                 )
             )
             transforms.append(
-                RandomTransform(
+                RandomTransform(time_handling_transform_class(
                     ApplyRandomBinaryOperatorTransform(
                         channel_idx=list(range(-len(foreground_labels), 0)),
                         strel_size=(1, 8),
                         p_per_label=1
-                    ), apply_probability=0.4
+                    )), apply_probability=0.4
                 )
             )
             transforms.append(
-                RandomTransform(
+                RandomTransform(time_handling_transform_class(
                     RemoveRandomConnectedComponentFromOneHotEncodingTransform(
                         channel_idx=list(range(-len(foreground_labels), 0)),
                         fill_with_other_class_p=0,
                         dont_do_if_covers_more_than_x_percent=0.15,
                         p_per_label=1
-                    ), apply_probability=0.2
+                    )), apply_probability=0.2
                 )
             )
 
@@ -838,7 +853,7 @@ class nnUNetTrainer(object):
             )
 
         if deep_supervision_scales is not None:
-            transforms.append(DownsampleSegForDSTransform(ds_scales=deep_supervision_scales))
+            transforms.append(time_handling_transform_class(DownsampleSegForDSTransform(ds_scales=deep_supervision_scales)))
 
         return ComposeTransforms(transforms)
 
@@ -889,7 +904,7 @@ class nnUNetTrainer(object):
         if isinstance(mod, OptimizedModule):
             mod = mod._orig_mod
 
-        mod.decoder.deep_supervision = enabled
+        mod.decoder.deep_supervision = False
 
     def on_train_start(self):
         if not self.was_initialized:
@@ -1254,7 +1269,7 @@ class nnUNetTrainer(object):
                 _ = [maybe_mkdir_p(join(self.output_folder_base, 'predicted_next_stage', n)) for n in next_stages]
 
             results = []
-
+        
             for i, k in enumerate(dataset_val.identifiers):
                 proceed = not check_workers_alive_and_busy(segmentation_export_pool, worker_list, results,
                                                            allowed_num_queued=2)
@@ -1337,7 +1352,7 @@ class nnUNetTrainer(object):
                     dist.barrier()
 
             _ = [r.get() for r in results]
-
+        
         if self.is_ddp:
             dist.barrier()
 

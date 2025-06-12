@@ -53,6 +53,10 @@ class SimpleITKIO(BaseReaderWriter):
                 # 4d, multiple modalities in one file
                 spacings_for_nnunet.append(list(spacings[-1])[::-1][1:])
                 pass
+            #TODO never checked if this works so leave it out
+            #elif npy_image.ndim == 6:
+            #    # 6D nifty file with time dimensions
+            #    spacings_for_nnunet.append(list(spacings[-1])[::-1][-4:])
             else:
                 raise RuntimeError(f"Unexpected number of dimensions: {npy_image.ndim} in file {f}")
 

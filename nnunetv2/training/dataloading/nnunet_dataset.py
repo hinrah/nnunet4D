@@ -175,6 +175,12 @@ class nnUNetDatasetBlosc2(nnUNetBaseDataset):
             # 'splitmode': blosc2.SplitMode.ALWAYS_SPLIT,
             'clevel': clevel,
         }
+
+        chunks=tuple(int(x) for x in chunks)
+        blocks=tuple(int(x) for x in blocks)
+        chunks_seg=tuple(int(x) for x in chunks_seg)
+        blocks_seg=tuple(int(x) for x in blocks_seg)
+
         # print(output_filename_truncated, data.shape, seg.shape, blocks, chunks, blocks_seg, chunks_seg, data.dtype, seg.dtype)
         blosc2.asarray(np.ascontiguousarray(data), urlpath=output_filename_truncated + '.b2nd', chunks=chunks,
                        blocks=blocks, cparams=cparams, mmap_mode='w+')

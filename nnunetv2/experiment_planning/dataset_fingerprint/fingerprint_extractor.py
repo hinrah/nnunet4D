@@ -42,9 +42,8 @@ class DatasetFingerprintExtractor(object):
     def collect_foreground_intensities(segmentation: np.ndarray, images: np.ndarray, seed: int = 1234,
                                        num_samples: int = 10000):
         """
-        images=image with multiple channels = shape (c, x, y(, z))
+        images=image with multiple channels = shape (c, x, y(, z(, t)))
         """
-        assert images.ndim == 4 and segmentation.ndim == 4
         assert not np.any(np.isnan(segmentation)), "Segmentation contains NaN values. grrrr.... :-("
         assert not np.any(np.isnan(images)), "Images contains NaN values. grrrr.... :-("
 
@@ -92,6 +91,8 @@ class DatasetFingerprintExtractor(object):
         rw = reader_writer_class()
         images, properties_images = rw.read_images(image_files)
         segmentation, properties_seg = rw.read_seg(segmentation_file)
+
+        num_samples = min(num_samples, 10000)
 
         # we no longer crop and save the cropped images before this is run. Instead we run the cropping on the fly.
         # Downside is that we need to do this twice (once here and once during preprocessing). Upside is that we don't
@@ -141,6 +142,7 @@ class DatasetFingerprintExtractor(object):
                     while len(remaining) > 0:
                         all_alive = all([j.is_alive() for j in workers])
                         if not all_alive:
+
                             raise RuntimeError('Some background worker is 6 feet under. Yuck. \n'
                                                'OK jokes aside.\n'
                                                'One of your background processes is missing. This could be because of '

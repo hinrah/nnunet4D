@@ -79,7 +79,7 @@ def resample_data_or_seg_to_spacing(data: np.ndarray,
                                                       separate_z_anisotropy_threshold)
 
     if data is not None:
-        assert data.ndim == 4, "data must be c x y z"
+        assert data.ndim == 4 or data.ndim == 5, "data must be c x y z (t)"
 
     shape = np.array(data.shape)
     new_shape = compute_new_shape(shape[1:], current_spacing, new_spacing)
@@ -105,8 +105,8 @@ def resample_data_or_seg_to_shape(data: Union[torch.Tensor, np.ndarray],
     do_separate_z, axis = determine_do_sep_z_and_axis(force_separate_z, current_spacing, new_spacing,
                                                       separate_z_anisotropy_threshold)
 
-    if data is not None:
-        assert data.ndim == 4, "data must be c x y z"
+    #if data is not None:
+    #    assert data.ndim == 4, "data must be c x y z"
 
     data_reshaped = resample_data_or_seg(data, new_shape, is_seg, axis, order, do_separate_z, order_z=order_z)
     return data_reshaped
@@ -126,7 +126,7 @@ def resample_data_or_seg(data: np.ndarray, new_shape: Union[Tuple[float, ...], L
     :param order_z: only applies if do_separate_z is True
     :return:
     """
-    assert data.ndim == 4, "data must be (c, x, y, z)"
+    assert data.ndim == 4 or data.ndim == 5, "data must be (c, x, y, z (t))"
     assert len(new_shape) == data.ndim - 1
 
     if is_seg:
@@ -143,6 +143,7 @@ def resample_data_or_seg(data: np.ndarray, new_shape: Union[Tuple[float, ...], L
     if np.any(shape != new_shape):
         data = data.astype(float, copy=False)
         if do_separate_z:
+            assert data.ndim == 4, "data must be (c, x, y, z)"
             # print("separate z, order in z is", order_z, "order inplane is", order)
             assert axis is not None, 'If do_separate_z, we need to know what axis is anisotropic'
             if axis == 0:

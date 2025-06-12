@@ -42,18 +42,26 @@ class NibabelIO(BaseReaderWriter):
         spacings_for_nnunet = []
         for f in image_fnames:
             nib_image = nibabel.load(f)
-            assert nib_image.ndim == 3, 'only 3d images are supported by NibabelIO'
+            if nib_image.ndim != 3:
+                if len(nib_image.get_fdata().squeeze().shape) > 4:
+                    raise AssertionError("There is more than a time dimension added")
+            
             original_affine = nib_image.affine
 
             original_affines.append(original_affine)
 
             # spacing is taken in reverse order to be consistent with SimpleITK axis ordering (confusing, I know...)
-            spacings_for_nnunet.append(
-                [float(i) for i in nib_image.header.get_zooms()[::-1]]
-            )
+            try: 
+                spacings_for_nnunet.append(
+                    [float(nib_image.header.get_zooms()[4])] + [float(i) for i in nib_image.header.get_zooms()[2::-1]]
+                )
+            except IndexError:
+                spacings_for_nnunet.append(
+                    [float(nib_image.header.get_zooms()[3])] + [float(i) for i in nib_image.header.get_zooms()[2::-1]]
+                )
 
             # transpose image to be consistent with the way SimpleITk reads images. Yeah. Annoying.
-            images.append(nib_image.get_fdata().transpose((2, 1, 0))[None])
+            images.append(nib_image.get_fdata().squeeze().transpose()[None])
 
         if not self._check_all_same([i.shape for i in images]):
             print('ERROR! Not all input images have the same shape!')
@@ -93,7 +101,7 @@ class NibabelIO(BaseReaderWriter):
 
     def write_seg(self, seg: np.ndarray, output_fname: str, properties: dict) -> None:
         # revert transpose
-        seg = seg.transpose((2, 1, 0)).astype(np.uint8 if np.max(seg) < 255 else np.uint16, copy=False)
+        seg = seg.squeeze().transpose().astype(np.uint8 if np.max(seg) < 255 else np.uint16, copy=False)
         seg_nib = nibabel.Nifti1Image(seg, affine=properties['nibabel_stuff']['original_affine'])
         nibabel.save(seg_nib, output_fname)
 

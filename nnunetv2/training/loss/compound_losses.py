@@ -4,6 +4,80 @@ from nnunetv2.training.loss.robust_ce_loss import RobustCrossEntropyLoss, TopKLo
 from nnunetv2.utilities.helpers import softmax_helper_dim1
 from torch import nn
 
+class VesselWallLoss(nn.Module):
+    def __init__(self, soft_dice_kwargs, ce_kwargs, weight_ce=1, weight_dice=1, ignore_label=None,
+                 dice_class=SoftDiceLoss, dilatation_size=3, padding=1, weight_morph=0.0001):
+        super(VesselWallLoss, self).__init__()
+        if ignore_label is None:
+            ignore_label = 99
+        self.ignore_label = ignore_label
+        self.used_loss = DC_and_CE_loss(soft_dice_kwargs, ce_kwargs, weight_ce, weight_dice, ignore_label,
+                 dice_class=SoftDiceLoss)
+        
+        if ignore_label is not None:
+            ce_kwargs['ignore_index'] = ignore_label
+        self.wall_loss = RobustCrossEntropyLoss(**ce_kwargs)
+
+        self._pool = nn.MaxPool3d(dilatation_size, stride=1, padding=padding)
+        self.weight_morph = weight_morph
+
+    @property
+    def dc(self):
+        return self.used_loss.dc
+    
+    @dc.setter
+    def dc(self, dc):
+        self.used_loss.dc = dc
+
+    def forward(self, net_output: torch.Tensor, target: torch.Tensor):
+        lumen_mask = (net_output.argmax(dim=1, keepdim=True)==2).float()
+        dilated = self._pool(lumen_mask.float())
+        wall_label = torch.where((dilated-lumen_mask)>0,1,self.ignore_label)
+        
+        usual_loss = self.used_loss(net_output, target)
+
+
+        mask = wall_label != self.ignore_label
+        num_fg = mask.sum()
+
+        wall_loss = self.wall_loss(net_output, wall_label[:, 0]) \
+            if self.weight_morph != 0 and (self.ignore_label is None or num_fg > 0) else 0
+
+        return usual_loss + self.weight_morph*wall_loss
+        
+class VesselWallLossWithActivator(nn.Module):
+    def __init__(self, soft_dice_kwargs, ce_kwargs, weight_ce=1, weight_dice=1, ignore_label=None,
+                 dice_class=SoftDiceLoss, dilatation_size=3):
+        super(VesselWallLossWithActivator, self).__init__()
+        if ignore_label is None:
+            ignore_label = 99
+        self.ignore_label = ignore_label
+        self.used_loss = DC_and_CE_loss(soft_dice_kwargs, ce_kwargs, weight_ce, weight_dice, ignore_label,
+                 dice_class=SoftDiceLoss)
+        self.vessel_wall_weight = 0
+        
+        self._pool = nn.MaxPool3d(dilatation_size, stride=1, padding=1)
+
+    def activate_vessel_wall_loss(self, weight=0.0001):
+        self.vessel_wall_weight = weight
+
+    @property
+    def dc(self):
+        return self.used_loss.dc
+    
+    @dc.setter
+    def dc(self, dc):
+        self.used_loss.dc = dc
+
+    def forward(self, net_output: torch.Tensor, target: torch.Tensor):
+        lumen_mask = (net_output.argmax(dim=1, keepdim=True)==2).float()
+        dilated = self._pool(lumen_mask.float())
+        wall_label = torch.where((dilated-lumen_mask)>0,1,self.ignore_label)
+        
+        usual_loss = self.used_loss(net_output, target)
+
+        wall_loss = self.used_loss(net_output, wall_label)
+        return usual_loss + self.vessel_wall_weight*wall_loss
 
 class DC_and_CE_loss(nn.Module):
     def __init__(self, soft_dice_kwargs, ce_kwargs, weight_ce=1, weight_dice=1, ignore_label=None,
@@ -18,6 +92,57 @@ class DC_and_CE_loss(nn.Module):
         :param weight_dice:
         """
         super(DC_and_CE_loss, self).__init__()
+        if ignore_label is not None:
+            ce_kwargs['ignore_index'] = ignore_label
+
+        self.weight_dice = weight_dice
+        self.weight_ce = weight_ce
+        self.ignore_label = ignore_label
+
+        self.ce = RobustCrossEntropyLoss(**ce_kwargs)
+        self.dc = dice_class(apply_nonlin=softmax_helper_dim1, **soft_dice_kwargs)
+
+    def forward(self, net_output: torch.Tensor, target: torch.Tensor):
+        """
+        target must be b, c, x, y(, z) with c=1
+        :param net_output:
+        :param target:
+        :return:
+        """
+        if self.ignore_label is not None:
+            assert target.shape[1] == 1, 'ignore label is not implemented for one hot encoded target variables ' \
+                                         '(DC_and_CE_loss)'
+            mask = target != self.ignore_label
+            # remove ignore label from target, replace with one of the known labels. It doesn't matter because we
+            # ignore gradients in those areas anyway
+            target_dice = torch.where(mask, target, 0)
+            num_fg = mask.sum()
+        else:
+            target_dice = target
+            mask = None
+
+        dc_loss = self.dc(net_output, target_dice, loss_mask=mask) \
+            if self.weight_dice != 0 else 0
+        ce_loss = self.ce(net_output, target[:, 0]) \
+            if self.weight_ce != 0 and (self.ignore_label is None or num_fg > 0) else 0
+
+        result = self.weight_ce * ce_loss + self.weight_dice * dc_loss
+        return result
+    
+#Todo can this be replaced by the normal DC and CE Loss??
+class Time_DC_and_CE_loss(nn.Module):
+    def __init__(self, soft_dice_kwargs, ce_kwargs, weight_ce=1, weight_dice=1, ignore_label=None,
+                 dice_class=SoftDiceLoss):
+        """
+        Weights for CE and Dice do not need to sum to one. You can set whatever you want.
+        :param soft_dice_kwargs:
+        :param ce_kwargs:
+        :param aggregate:
+        :param square_dice:
+        :param weight_ce:
+        :param weight_dice:
+        """
+        super(Time_DC_and_CE_loss, self).__init__()
         if ignore_label is not None:
             ce_kwargs['ignore_index'] = ignore_label
 

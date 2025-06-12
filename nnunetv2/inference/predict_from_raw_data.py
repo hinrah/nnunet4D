@@ -522,7 +522,7 @@ class nnUNetPredictor(object):
                         slicers.append(
                             tuple([slice(None), d, *[slice(si, si + ti) for si, ti in
                                                      zip((sx, sy), self.configuration_manager.patch_size)]]))
-        else:
+        elif len(image_size)==3:
             steps = compute_steps_for_sliding_window(image_size, self.configuration_manager.patch_size,
                                                      self.tile_step_size)
             if self.verbose: print(
@@ -534,6 +534,19 @@ class nnUNetPredictor(object):
                         slicers.append(
                             tuple([slice(None), *[slice(si, si + ti) for si, ti in
                                                   zip((sx, sy, sz), self.configuration_manager.patch_size)]]))
+        else:
+            steps = compute_steps_for_sliding_window(image_size, self.configuration_manager.patch_size,
+                                                     self.tile_step_size)
+            if self.verbose: print(
+                f'n_steps {np.prod([len(i) for i in steps])}, image size is {image_size}, tile_size {self.configuration_manager.patch_size}, '
+                f'tile_step_size {self.tile_step_size}\nsteps:\n{steps}')
+            for sx in steps[0]:
+                for sy in steps[1]:
+                    for sz in steps[2]:
+                        for st in steps[3]:
+                            slicers.append(
+                                tuple([slice(None), *[slice(si, si + ti) for si, ti in
+                                                    zip((sx, sy, sz, st), self.configuration_manager.patch_size)]]))
         return slicers
 
     @torch.inference_mode()
@@ -645,7 +658,7 @@ class nnUNetPredictor(object):
         # is set. Whyyyyyyy. (this is why we don't make use of enabled=False)
         # So autocast will only be active if we have a cuda device.
         with torch.autocast(self.device.type, enabled=True) if self.device.type == 'cuda' else dummy_context():
-            assert input_image.ndim == 4, 'input_image must be a 4D np.ndarray or torch.Tensor (c, x, y, z)'
+            assert input_image.ndim == 4 or input_image.ndim == 5,  'input_image must be a 5D np.ndarray or torch.Tensor (c, t, x, y(, z))'
 
             if self.verbose:
                 print(f'Input shape: {input_image.shape}')

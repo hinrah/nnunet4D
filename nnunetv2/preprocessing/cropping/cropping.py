@@ -9,7 +9,7 @@ def create_nonzero_mask(data):
     :param data:
     :return: the mask is True where the data is nonzero
     """
-    assert data.ndim in (3, 4), "data must have shape (C, X, Y, Z) or shape (C, X, Y)"
+    assert data.ndim in (3, 4, 5), "data must have shape(C, X, Y, Z, T), (C, X, Y, Z) or shape (C, X, Y)"
     nonzero_mask = data[0] != 0
     for c in range(1, data.shape[0]):
         nonzero_mask |= data[c] != 0

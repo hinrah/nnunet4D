@@ -154,7 +154,7 @@ def plan_and_preprocess_entry():
                              'differently named plans file such that the nnunet default plans are not '
                              'overwritten. You will then need to specify your custom plans file with -p whenever '
                              'running other nnunet commands (training, inference etc)')
-    parser.add_argument('-c', required=False, default=['2d', '3d_fullres', '3d_lowres'], nargs='+',
+    parser.add_argument('-c', required=False, default=['2d', '3d_fullres', '3d_lowres', '4d_fullres'], nargs='+',
                         help='[OPTIONAL] Configurations for which the preprocessing should be run. Default: 2d 3d_fullres '
                              '3d_lowres. 3d_cascade_fullres does not need to be specified because it uses the data '
                              'from 3d_fullres. Configurations that do not exist for some dataset will be skipped.')
@@ -186,7 +186,7 @@ def plan_and_preprocess_entry():
 
     # manage default np
     if args.np is None:
-        default_np = {"2d": 8, "3d_fullres": 4, "3d_lowres": 8}
+        default_np = {"2d": 8, "3d_fullres": 4, "3d_lowres": 8, "4d_fullres": 4}
         np = [default_np[c] if c in default_np.keys() else 4 for c in args.c]
     else:
         np = args.np
